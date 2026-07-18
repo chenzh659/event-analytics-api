@@ -10,6 +10,11 @@
 </p>
 
 <p align="center">
+  <a href="README.md"><img src="https://img.shields.io/badge/lang-English-blue?style=for-the-badge" alt="English"/></a>
+  <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/lang-%E4%B8%AD%E6%96%87-red?style=for-the-badge" alt="中文"/></a>
+</p>
+
+<p align="center">
   <a href="https://github.com/chenzh659/event-analytics-api/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/chenzh659/event-analytics-api/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"/></a>
   <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/FastAPI-0.115+-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
@@ -26,7 +31,8 @@
   <a href="#-testing--load">Testing</a> ·
   <a href="#-project-structure">Structure</a> ·
   <a href="#-design-highlights">Design</a> ·
-  <a href="docs/resume-talk-track.md">Interview notes</a>
+  <a href="docs/resume-talk-track.md">Interview notes</a> ·
+  <a href="README.zh-CN.md">中文文档</a>
 </p>
 
 ---
