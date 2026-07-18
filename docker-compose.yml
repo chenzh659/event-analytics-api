@@ -1,0 +1,111 @@
+services:
+  postgres:
+    # Use 17-alpine (already present locally) to avoid flaky pulls of 16.
+    image: postgres:17-alpine
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=all
+    environment:
+      POSTGRES_USER: events
+      POSTGRES_PASSWORD: events
+      POSTGRES_DB: events
+    # Host ports remapped to avoid collisions with other local stacks.
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U events -d events"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    command: ["bash", "scripts/entrypoint.sh"]
+    env_file:
+      - .env.example
+    environment:
+      DATABASE_URL: postgresql+asyncpg://events:events@postgres:5432/events
+      DATABASE_URL_SYNC: postgresql://events:events@postgres:5432/events
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: dev-jwt-secret-change-in-production-32chars
+    ports:
+      - "8001:8000"
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  worker:
+    build: .
+    command: ["bash", "scripts/worker-entrypoint.sh"]
+    env_file:
+      - .env.example
+    environment:
+      DATABASE_URL: postgresql+asyncpg://events:events@postgres:5432/events
+      DATABASE_URL_SYNC: postgresql://events:events@postgres:5432/events
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: dev-jwt-secret-change-in-production-32chars
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres_data:
+  redis_data:
