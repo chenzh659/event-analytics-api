@@ -1,174 +1,253 @@
-# event-analytics-api
+<p align="center">
+  <img src="docs/assets/banner.svg" alt="Event Analytics API banner" width="100%"/>
+</p>
 
-用户行为采集与实时指标后端服务（Portfolio / 简历向）。
+<h1 align="center">event-analytics-api</h1>
 
-实现埋点事件接入、JWT + RBAC、幂等写入、Redis Streams 异步管道、日活 / 漏斗 / 留存后台计算、限流、结构化日志、Prometheus / Grafana 监控，以及 **基于真实 Locust 压测结果的性能报告**（禁止编造数字）。
+<p align="center">
+  <strong>User behavior collection &amp; real-time metrics backend</strong><br/>
+  <em>Portfolio-grade FastAPI service — async ingest, reliable streams, metrics jobs, honest load tests</em>
+</p>
 
-## 技术栈
+<p align="center">
+  <a href="https://github.com/chenzh659/event-analytics-api/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/chenzh659/event-analytics-api/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"/></a>
+  <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"/>
+  <img src="https://img.shields.io/badge/FastAPI-0.115+-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
+  <img src="https://img.shields.io/badge/PostgreSQL-17-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL"/>
+  <img src="https://img.shields.io/badge/Redis-7%20Streams-DC382D?style=for-the-badge&logo=redis&logoColor=white" alt="Redis"/>
+  <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="MIT"/>
+</p>
 
-| 层 | 选型 |
-|----|------|
-| API | Python 3.12 · FastAPI · Uvicorn |
-| DB | PostgreSQL 16 · SQLAlchemy 2 async · Alembic |
-| Cache / MQ / Jobs | Redis 7 Streams · ARQ |
-| Auth | JWT (HS256) · bcrypt · RBAC |
-| Observability | structlog · prometheus-client · Grafana |
-| Load test | Locust |
+<p align="center">
+  <a href="#-features">Features</a> ·
+  <a href="#-architecture">Architecture</a> ·
+  <a href="#-quick-start">Quick Start</a> ·
+  <a href="#-api-overview">API</a> ·
+  <a href="#-testing--load">Testing</a> ·
+  <a href="#-project-structure">Structure</a> ·
+  <a href="#-design-highlights">Design</a> ·
+  <a href="docs/resume-talk-track.md">Interview notes</a>
+</p>
 
-## 架构一览
+---
 
+## ✨ Features
+
+| Area | What you get |
+|------|----------------|
+| **Event ingest** | `view` / `search` / `add_to_cart` / `order` · single + batch · API versioning `/api/v1` |
+| **Auth & RBAC** | JWT (HS256) · roles `admin` / `analyst` / `client_app` · permission checks |
+| **Idempotency** | Client `event_id` + Redis `SET NX` + DB `UNIQUE` + `ON CONFLICT DO NOTHING` |
+| **Async pipeline** | Redis Streams → ARQ worker · optional sync mode via `INGEST_MODE` |
+| **Reliability** | **XAUTOCLAIM** reclaim · **DLQ** for poison messages · stream `MAXLEN` |
+| **Metrics jobs** | DAU · funnel · D1/D7 retention · advisory locks · Redis cache-aside |
+| **Approx realtime DAU** | HyperLogLog on write path (O(1) memory) |
+| **Rate limit** | Sliding window · Lua ZSET · IP / user / event-write quotas |
+| **Observability** | structlog JSON · `X-Request-ID` · Prometheus · Grafana · path-label normalization |
+| **Ops probes** | `/health` liveness · `/ready` readiness (**503** when deps down) |
+| **Data layer** | SQLAlchemy 2 async · Alembic · **BRIN** on `server_ts` · partial indexes |
+| **Hardening** | Optimistic lock on users · body size cap · security headers |
+| **Honest perf** | Locust → CSV → `write_perf_report.py` · **no fabricated p95/RPS** |
+
+---
+
+## 🏗 Architecture
+
+<p align="center">
+  <img src="docs/assets/architecture.svg" alt="System architecture diagram" width="100%"/>
+</p>
+
+### Reliable ingest path
+
+<p align="center">
+  <img src="docs/assets/pipeline.svg" alt="Reliable event pipeline" width="100%"/>
+</p>
+
+<details>
+<summary><strong>Text diagram (copy-friendly)</strong></summary>
+
+```text
+Client / Locust
+    │  JWT + RBAC + sliding-window RL
+    ▼
+FastAPI  ──SET NX──► Redis idem keys
+    │ XADD (async) / INSERT (sync)
+    ▼
+stream:events  ──►  ARQ worker
+    │                 ├─ XREADGROUP
+    │                 ├─ XAUTOCLAIM (stuck PEL)
+    │                 ├─ INSERT ON CONFLICT DO NOTHING
+    │                 ├─ PFADD hll:dau
+    │                 └─ poison → stream:events:dlq
+    ▼
+PostgreSQL (events, metrics_*, users)
+    ▲
+Metrics API ◄── cache-aside Redis
+Prometheus  ◄── /metrics ──► Grafana
 ```
-Client/Locust → FastAPI (/api/v1)
-                  ├─ POST /events → Redis NX 幂等 → XADD stream:events → 202
-                  └─ GET  /metrics → Redis 缓存 → metrics_* 表
 
-stream:events → ARQ worker → PostgreSQL (ON CONFLICT DO NOTHING)
-ARQ cron      → DAU / funnel / retention
-Prometheus    → scrape /metrics → Grafana :3000
-```
+</details>
 
-详见 [docs/architecture.md](docs/architecture.md)。
+More detail: [docs/architecture.md](docs/architecture.md)
 
+---
 
-## 本地端口映射（避免与其它项目冲突）
+## 🚀 Quick Start
 
-| 服务 | 容器端口 | 宿主机 |
-|------|----------|--------|
-| API | 8000 | **8001** |
-| Postgres | 5432 | **5433** |
-| Redis | 6379 | **6380** |
-| Prometheus | 9090 | 9090 |
-| Grafana | 3000 | **3001** |
+### Prerequisites
 
-## 快速启动
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) / Docker Compose v2
+- (Optional) Python 3.12 for local tooling
 
-### 前置条件
-
-- Docker Desktop / Docker Compose
-- （可选）本机 Python 3.12，仅用于本地开发
-
-### 一键启动
+### One command
 
 ```bash
-# 在仓库根目录
-cp .env.example .env   # Windows: copy .env.example .env
+git clone https://github.com/chenzh659/event-analytics-api.git
+cd event-analytics-api
 
+cp .env.example .env          # Windows: copy .env.example .env
 docker compose up -d --build
 ```
 
-等待 `api` healthy 后：
+Wait until `api` is healthy, then:
 
 ```bash
 curl http://localhost:8001/health
 # {"status":"ok","service":"event-analytics-api","version":"1.0.0"}
 ```
 
-- API 文档：http://localhost:8001/docs  
-- Prometheus：http://localhost:9090  
-- Grafana：http://localhost:3001（宿主机端口映射，避免与其它项目冲突） （`admin` / `admin`）
+| Surface | URL |
+|---------|-----|
+| Swagger UI | http://localhost:8001/docs |
+| ReDoc | http://localhost:8001/redoc |
+| Prometheus | http://localhost:9090 |
+| Grafana | http://localhost:3001 (`admin` / `admin`) |
 
-### 种子账号
+> **Port map** (avoids clashing with other local stacks): API **8001**, Postgres **5433**, Redis **6380**, Grafana **3001**.
 
-| 角色 | Email | Password |
+### Seed accounts
+
+| Role | Email | Password |
 |------|-------|----------|
-| admin | admin@example.com | Admin123! |
-| analyst | analyst@example.com | Analyst123! |
-| client_app | client@example.com | Client123! |
+| admin | `admin@example.com` | `Admin123!` |
+| analyst | `analyst@example.com` | `Analyst123!` |
+| client_app | `client@example.com` | `Client123!` |
 
-## 演示流程（约 15 分钟）
+---
+
+## 🎬 15-minute demo
 
 ```bash
-# 1. 登录 client
+# 1) Login as client
 TOKEN=$(curl -s -X POST http://localhost:8001/api/v1/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"client@example.com","password":"Client123!"}' | jq -r .access_token)
 
-# 2. 上报事件
+# 2) Ingest an event
 EVENT_ID=$(python -c "import uuid; print(uuid.uuid4())")
 curl -s -X POST http://localhost:8001/api/v1/events \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d "{\"event_id\":\"$EVENT_ID\",\"session_id\":\"demo-1\",\"event_type\":\"view\",\"properties\":{\"page\":\"/home\"}}"
 
-# 3. 幂等重放（应返回 deduplicated: true）
+# 3) Replay → deduplicated: true
 curl -s -X POST http://localhost:8001/api/v1/events \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d "{\"event_id\":\"$EVENT_ID\",\"session_id\":\"demo-1\",\"event_type\":\"view\",\"properties\":{\"page\":\"/home\"}}"
 
-# 4. 查看 worker 消费
+# 4) Worker consumption
 docker compose logs worker --tail=50
 
-# 5. 分析师读指标
+# 5) Metrics as analyst
 ANALYST=$(curl -s -X POST http://localhost:8001/api/v1/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"analyst@example.com","password":"Analyst123!"}' | jq -r .access_token)
 
 curl -s http://localhost:8001/api/v1/metrics/dau -H "Authorization: Bearer $ANALYST"
 curl -s http://localhost:8001/api/v1/metrics/funnel -H "Authorization: Bearer $ANALYST"
-curl -s http://localhost:8001/metrics | head
+curl -s http://localhost:8001/api/v1/admin/queue \
+  -H "Authorization: Bearer $(curl -s -X POST http://localhost:8001/api/v1/auth/login \
+    -H 'Content-Type: application/json' \
+    -d '{"email":"admin@example.com","password":"Admin123!"}' | jq -r .access_token)"
 ```
 
-Windows PowerShell 可用 `Invoke-RestMethod` 代替 `curl` / `jq`。
+Windows PowerShell: use `Invoke-RestMethod` instead of `curl` / `jq`.
 
-## 主要 API（v1）
+---
 
-| 方法 | 路径 | 权限 |
-|------|------|------|
-| POST | `/api/v1/auth/register` | public |
-| POST | `/api/v1/auth/login` | public |
-| GET | `/api/v1/auth/me` | authenticated |
-| POST | `/api/v1/events` | `events:write` |
-| POST | `/api/v1/events/batch` | `events:batch` |
-| GET | `/api/v1/events/{event_id}` | `events:read` |
-| GET | `/api/v1/metrics/dau` | `metrics:read` |
-| GET | `/api/v1/metrics/funnel` | `metrics:read` |
-| GET | `/api/v1/metrics/retention` | `metrics:read` |
-| GET | `/api/v1/metrics/realtime/events-per-minute` | `metrics:read` |
-| GET | `/api/v1/metrics/summary` | `metrics:read` |
-| GET | `/api/v1/admin/users` | `users:manage` |
-| PATCH | `/api/v1/admin/users/{id}` | `users:manage`（乐观锁 `version`） |
-| GET | `/api/v1/admin/queue` | `queue:read` |
-| POST | `/api/v1/admin/jobs/{job_name}` | `jobs:trigger` |
-| GET | `/health` · `/ready` · `/metrics` | public / ops |
+## 📡 API Overview
 
-统一错误体：
+| Method | Path | Auth |
+|--------|------|------|
+| `POST` | `/api/v1/auth/register` | public |
+| `POST` | `/api/v1/auth/login` | public |
+| `GET` | `/api/v1/auth/me` | authenticated |
+| `POST` | `/api/v1/events` | `events:write` |
+| `POST` | `/api/v1/events/batch` | `events:batch` |
+| `GET` | `/api/v1/events/{event_id}` | `events:read` |
+| `GET` | `/api/v1/metrics/dau` | `metrics:read` |
+| `GET` | `/api/v1/metrics/funnel` | `metrics:read` |
+| `GET` | `/api/v1/metrics/retention` | `metrics:read` |
+| `GET` | `/api/v1/metrics/realtime/events-per-minute` | `metrics:read` |
+| `GET` | `/api/v1/metrics/summary` | `metrics:read` |
+| `GET` | `/api/v1/admin/users` | `users:manage` |
+| `PATCH` | `/api/v1/admin/users/{id}` | `users:manage` (+ optimistic `version`) |
+| `GET` | `/api/v1/admin/queue` | `queue:read` |
+| `POST` | `/api/v1/admin/jobs/{job_name}` | `jobs:trigger` |
+| `GET` | `/health` · `/ready` · `/metrics` | public / ops |
+
+**Error envelope**
 
 ```json
-{ "error": { "code": "forbidden", "message": "...", "request_id": "..." } }
+{
+  "error": {
+    "code": "forbidden",
+    "message": "Missing permission: metrics:read",
+    "request_id": "…"
+  }
+}
 ```
 
-## 配置要点
+Interactive docs: **http://localhost:8001/docs** after `compose up`.
 
-见 [`.env.example`](.env.example)。
+---
 
-- `INGEST_MODE=async|sync`：异步进 Streams，或同步写库  
-- 限流：`RATE_LIMIT_IP` / `RATE_LIMIT_USER` / `RATE_LIMIT_EVENTS`  
-- 缓存 TTL：`CACHE_TTL_*`  
+## ⚙️ Configuration
 
-## 测试
+See [`.env.example`](.env.example). Highlights:
+
+| Variable | Meaning |
+|----------|---------|
+| `INGEST_MODE` | `async` (Streams) or `sync` (request-path write) |
+| `RATE_LIMIT_*` | Sliding-window quotas (IP / user / events) |
+| `EVENT_CLAIM_MIN_IDLE_MS` | PEL reclaim threshold for `XAUTOCLAIM` |
+| `EVENT_MAX_DELIVERIES` | Poison threshold → DLQ |
+| `CACHE_TTL_*` | Metrics cache TTLs |
+| `JWT_SECRET` | **Change in any shared environment** |
+
+---
+
+## 🧪 Testing & Load
 
 ```bash
-# 单元 + ASGI smoke（不强制外部依赖）
+# Unit + ASGI health (no external deps required for pure unit)
 docker compose exec api pytest tests/unit tests/integration/test_health.py -q
 
-# 全链路集成（容器内）
-docker compose exec -e RUN_INTEGRATION=1 api pytest tests/integration -q --cov=app
+# HTTP integration against live stack (from inside Compose network)
+docker compose exec -e RUN_INTEGRATION=1 -e API_BASE_URL=http://api:8000 api \
+  pytest tests/integration/test_api_flow.py -q
 ```
 
-## 压测与性能报告（真实数字）
-
-**禁止手写 p95 / RPS。** 用脚本从 Locust CSV 生成：
+### Performance report (real numbers only)
 
 ```bash
 mkdir -p results
 
-# 示例：50 并发用户，跑 5 分钟
+# Example: 50 users, 5 minutes (adjust for your machine)
 docker compose exec api locust -f tests/load/locustfile.py \
-  --host http://localhost:8001 \
+  --host http://api:8000 \
   --headless -u 50 -r 10 -t 5m --csv=results/run1
-
-docker compose exec api pytest -q --cov=app --cov-report=term-missing
 
 docker compose exec api python scripts/write_perf_report.py \
   --csv results/run1_stats.csv \
@@ -177,52 +256,96 @@ docker compose exec api python scripts/write_perf_report.py \
   --out docs/performance-report.md
 ```
 
-报告模板与说明：[docs/performance-report.md](docs/performance-report.md)
+Template: [docs/performance-report.md](docs/performance-report.md) — placeholders until Locust is run.
 
-可选历史数据（便于漏斗 / 留存）：
+Optional historical data (funnel / retention demos):
 
 ```bash
 docker compose exec api python -m scripts.generate_load_data \
   --days 14 --users 200 --events-per-day 500
 ```
 
-慢查询分析：
+Slow-query helpers (`pg_stat_statements`):
 
 ```bash
 docker compose exec -T postgres psql -U events -d events < scripts/analyze_slow_queries.sql
 ```
 
-## 项目结构
+---
 
+## 📁 Project structure
+
+```text
+event-analytics-api/
+├── app/
+│   ├── api/v1/           # versioned routes (auth, events, metrics, admin)
+│   ├── core/             # security, RBAC, exceptions, RL, middleware
+│   ├── db/models/        # SQLAlchemy models
+│   ├── services/         # business logic
+│   ├── mq/               # Redis Streams (produce / reclaim / DLQ)
+│   ├── workers/          # ARQ settings + jobs
+│   └── observability/    # Prometheus metrics
+├── alembic/              # migrations (incl. BRIN)
+├── scripts/              # seed, load data, perf report, entrypoints
+├── tests/                # unit · integration · load (Locust)
+├── monitoring/           # Prometheus + Grafana provisioning
+├── docs/
+│   ├── assets/           # README diagrams (SVG)
+│   ├── architecture.md
+│   ├── performance-report.md
+│   └── resume-talk-track.md
+├── docker-compose.yml
+└── .github/workflows/ci.yml
 ```
-app/
-  api/v1/          # 路由
-  core/            # 安全、RBAC、异常、限流、中间件
-  db/models/       # ORM
-  services/        # 业务
-  mq/              # Redis Streams
-  workers/         # ARQ
-  observability/   # Prometheus 指标
-scripts/           # seed / 压测报告 / 慢查询
-tests/             # unit · integration · load
-monitoring/        # Prometheus & Grafana
-docs/              # 架构与性能报告
-```
 
-## 设计说明（简历可讲点）
+---
 
-1. **幂等**：客户端 `event_id` + Redis `SET NX` + DB `UNIQUE` + `ON CONFLICT DO NOTHING`，兼容 at-least-once。  
-2. **异步解耦**：接入路径快速返回 202，worker 批量落库；Streams **MAXLEN** 控内存。  
-3. **可靠消费**：`XAUTOCLAIM` 回收 PEL 卡住消息；超过投递次数进 **DLQ**（`stream:events:dlq`）。  
-4. **滑动窗口限流**：Redis ZSET + Lua 原子脚本，按 IP / 用户 / 写事件三级配额。  
-5. **指标任务**：advisory lock 防并发重算；快照表 + cache-aside；**HyperLogLog** 近似实时 DAU。  
-6. **存储**：时序场景 **BRIN(server_ts)** + 部分索引；`pg_stat_statements` 慢查询脚本。  
-7. **乐观锁**：`PATCH /admin/users` 要求 `version`，冲突 409。  
-8. **可观测**：`X-Request-ID`、路径归一化 Prometheus 标签、liveness/readiness 分离、Grafana 面板。  
-9. **诚信压测**：报告只由 `write_perf_report.py` 从 Locust CSV 写出。  
+## 💡 Design highlights
 
-面试话术与 bullet 模板见：[docs/resume-talk-track.md](docs/resume-talk-track.md)。
+1. **Multi-layer idempotency** — client UUID + Redis NX + DB unique + upsert-safe insert.  
+2. **Decoupled write path** — API returns **202** quickly; worker batches to Postgres.  
+3. **Stream reliability** — `XAUTOCLAIM` for stuck PEL; max-delivery **DLQ** (`stream:events:dlq`).  
+4. **Sliding-window rate limit** — atomic Redis Lua / ZSET (less boundary burst than fixed windows).  
+5. **Metric jobs** — `pg_advisory_xact_lock`, snapshot tables, cache-aside, optional HLL.  
+6. **Time-series indexes** — BRIN(`server_ts`) + partial indexes for user-active scans.  
+7. **Optimistic concurrency** — `PATCH /admin/users` with `version` → **409** on conflict.  
+8. **Cardinality-safe metrics** — path UUIDs normalized to `{id}` before Prometheus labels.  
+9. **Probe split** — liveness never depends on Redis/PG; readiness does.  
+10. **Honest load testing** — report generator only accepts measured Locust CSV.
 
-## License
+Interview bullets & Q&A: [docs/resume-talk-track.md](docs/resume-talk-track.md)
 
-MIT（可按需修改）
+---
+
+## 🛠 Tech stack
+
+| Layer | Choice |
+|-------|--------|
+| API | Python 3.12 · FastAPI · Uvicorn |
+| DB | PostgreSQL · SQLAlchemy 2 async · Alembic · asyncpg |
+| Cache / MQ / Jobs | Redis 7 Streams · ARQ |
+| Auth | JWT HS256 · bcrypt · RBAC |
+| Observability | structlog · prometheus-client · Grafana |
+| Load | Locust |
+| Packaging | Docker Compose · GitHub Actions CI |
+
+---
+
+## 🗺 Roadmap (optional)
+
+- [ ] Multi-consumer horizontal scale demo  
+- [ ] OpenTelemetry traces  
+- [ ] Partitioned `events` table for multi-month retention  
+- [ ] Publish measured Locust report after CI-friendly load job  
+
+---
+
+## 📄 License
+
+[MIT](LICENSE) © 2026 [chenzh659](https://github.com/chenzh659)
+
+---
+
+<p align="center">
+  <sub>Built as a portfolio backend — production patterns, honest numbers, interview-ready design notes.</sub>
+</p>

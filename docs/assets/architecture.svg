@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="620" viewBox="0 0 1100 620" role="img" aria-labelledby="title desc">
+  <title id="title">Event Analytics API Architecture</title>
+  <desc id="desc">Client to FastAPI to Redis Streams to ARQ worker to PostgreSQL, with Prometheus and Grafana</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="boxA" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+    <linearGradient id="boxB" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+    <linearGradient id="boxC" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#a78bfa"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="boxD" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+    <linearGradient id="boxE" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fb7185"/>
+      <stop offset="100%" stop-color="#e11d48"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#94a3b8"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <rect width="1100" height="620" rx="16" fill="url(#bg)"/>
+  <text x="40" y="48" fill="#f8fafc" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="26" font-weight="700">event-analytics-api</text>
+  <text x="40" y="76" fill="#94a3b8" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14">Architecture overview · async ingest · reliable streams · metrics jobs · observability</text>
+
+  <!-- Client -->
+  <g filter="url(#shadow)">
+    <rect x="40" y="130" width="160" height="80" rx="12" fill="url(#boxA)"/>
+    <text x="120" y="165" text-anchor="middle" fill="#0f172a" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700">Client / Locust</text>
+    <text x="120" y="188" text-anchor="middle" fill="#0f172a" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">HTTP JSON / JWT</text>
+  </g>
+
+  <!-- API -->
+  <g filter="url(#shadow)">
+    <rect x="260" y="110" width="200" height="120" rx="12" fill="url(#boxB)"/>
+    <text x="360" y="145" text-anchor="middle" fill="#052e16" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700">FastAPI (/api/v1)</text>
+    <text x="360" y="168" text-anchor="middle" fill="#052e16" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">JWT · RBAC · Validate</text>
+    <text x="360" y="188" text-anchor="middle" fill="#052e16" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">Sliding-window RL</text>
+    <text x="360" y="208" text-anchor="middle" fill="#052e16" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">Idempotency SET NX</text>
+  </g>
+
+  <!-- Redis -->
+  <g filter="url(#shadow)">
+    <rect x="520" y="90" width="220" height="160" rx="12" fill="url(#boxC)"/>
+    <text x="630" y="125" text-anchor="middle" fill="#1e1b4b" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700">Redis 7</text>
+    <text x="630" y="150" text-anchor="middle" fill="#1e1b4b" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">Streams · DLQ · AOF</text>
+    <text x="630" y="172" text-anchor="middle" fill="#1e1b4b" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">Cache-aside metrics</text>
+    <text x="630" y="194" text-anchor="middle" fill="#1e1b4b" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">Sliding RL (Lua ZSET)</text>
+    <text x="630" y="216" text-anchor="middle" fill="#1e1b4b" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">HyperLogLog ≈ DAU</text>
+  </g>
+
+  <!-- Worker -->
+  <g filter="url(#shadow)">
+    <rect x="800" y="110" width="240" height="120" rx="12" fill="url(#boxD)"/>
+    <text x="920" y="148" text-anchor="middle" fill="#422006" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700">ARQ Worker</text>
+    <text x="920" y="172" text-anchor="middle" fill="#422006" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">XREADGROUP + XAUTOCLAIM</text>
+    <text x="920" y="194" text-anchor="middle" fill="#422006" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">Batch INSERT · DLQ · Cron</text>
+  </g>
+
+  <!-- Postgres -->
+  <g filter="url(#shadow)">
+    <rect x="800" y="300" width="240" height="100" rx="12" fill="url(#boxE)"/>
+    <text x="920" y="340" text-anchor="middle" fill="#4c0519" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700">PostgreSQL</text>
+    <text x="920" y="365" text-anchor="middle" fill="#4c0519" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">events · snapshots · BRIN</text>
+    <text x="920" y="385" text-anchor="middle" fill="#4c0519" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">ON CONFLICT DO NOTHING</text>
+  </g>
+
+  <!-- Metrics APIs box -->
+  <g filter="url(#shadow)">
+    <rect x="260" y="300" width="200" height="100" rx="12" fill="#334155"/>
+    <text x="360" y="340" text-anchor="middle" fill="#f8fafc" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" font-weight="700">Metrics API</text>
+    <text x="360" y="365" text-anchor="middle" fill="#cbd5e1" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">DAU · Funnel · Retention</text>
+    <text x="360" y="385" text-anchor="middle" fill="#cbd5e1" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">cache-aside · summary</text>
+  </g>
+
+  <!-- Observability -->
+  <g filter="url(#shadow)">
+    <rect x="40" y="460" width="300" height="90" rx="12" fill="#1e293b" stroke="#475569" stroke-width="1.5"/>
+    <text x="190" y="500" text-anchor="middle" fill="#f8fafc" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" font-weight="700">Prometheus → Grafana</text>
+    <text x="190" y="525" text-anchor="middle" fill="#94a3b8" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">scrape /metrics · lag · RPS · DLQ</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="380" y="460" width="300" height="90" rx="12" fill="#1e293b" stroke="#475569" stroke-width="1.5"/>
+    <text x="530" y="500" text-anchor="middle" fill="#f8fafc" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" font-weight="700">Probes</text>
+    <text x="530" y="525" text-anchor="middle" fill="#94a3b8" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">/health (live) · /ready (deps) 503</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="720" y="460" width="320" height="90" rx="12" fill="#1e293b" stroke="#475569" stroke-width="1.5"/>
+    <text x="880" y="500" text-anchor="middle" fill="#f8fafc" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" font-weight="700">Honesty rule</text>
+    <text x="880" y="525" text-anchor="middle" fill="#94a3b8" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">Perf numbers only from Locust CSV</text>
+  </g>
+
+  <!-- Arrows -->
+  <line x1="200" y1="170" x2="255" y2="170" stroke="#94a3b8" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="460" y1="170" x2="515" y2="170" stroke="#94a3b8" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="740" y1="170" x2="795" y2="170" stroke="#94a3b8" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="920" y1="230" x2="920" y2="295" stroke="#94a3b8" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="800" y1="350" x2="465" y2="350" stroke="#64748b" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+  <line x1="360" y1="230" x2="360" y2="295" stroke="#64748b" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+  <line x1="360" y1="400" x2="360" y2="455" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="225" y="158" fill="#64748b" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11">POST /events</text>
+  <text x="470" y="158" fill="#64748b" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11">XADD 202</text>
+  <text x="750" y="158" fill="#64748b" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11">consume</text>
+  <text x="930" y="270" fill="#64748b" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11">persist</text>
+</svg>
